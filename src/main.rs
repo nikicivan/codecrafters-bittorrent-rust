@@ -1,11 +1,13 @@
-use serde_json;
+use serde_json::Value;
 use std::env;
 
-// Available if you need it!
-// use serde_bencode
+fn decode_bencoded_value(encoded_value: &str) -> Value {
+    decode_bencoded_start_at(encoded_value, 0).0
+}
 
-#[allow(dead_code)]
-fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
+fn decode_bencoded_start_at(raw_value: &str, start_index: usize) -> (Value, usize) {
+    let encoded_value = &raw_value[start_index..];
+
     match encoded_value.chars().next().unwrap() {
         c if c.is_digit(10) => {
             // Example: "5:hello" -> "hello
@@ -13,7 +15,12 @@ fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
             let number_string = &encoded_value[..colon_idx];
             let number = number_string.parse::<i64>().unwrap();
             let string = &encoded_value[colon_idx + 1..colon_idx + 1 + number as usize];
-            serde_json::Value::String(string.to_string())
+
+            let part_len = colon_idx + number as usize;
+            (
+                Value::String(string.to_string()),
+                start_index + part_len + 1,
+            )
         }
         'i' => {
             let end_index = encoded_value.find("e").unwrap();
@@ -21,10 +28,27 @@ fn decode_bencoded_value(encoded_value: &str) -> serde_json::Value {
             let number = number_string.parse::<i64>().unwrap();
             let real_number_str = number.to_string();
             if real_number_str.len() == number_string.len() {
-                number.into()
+                let part_len = number_string.len() + 2;
+                (number.into(), start_index + part_len)
             } else {
                 panic!("Unhandled encoded value: {}", encoded_value)
             }
+        }
+        'l' => {
+            let mut list: Vec<Value> = Vec::new();
+            let mut idx = start_index + 1;
+
+            while raw_value.chars().nth(idx).unwrap() != 'e' {
+                let (value, new_idx) = decode_bencoded_start_at(raw_value, idx);
+                list.push(value);
+                idx = new_idx;
+
+                if raw_value.len() <= idx {
+                    panic!("Unhandled encoded value: {}", encoded_value)
+                }
+            }
+
+            (list.into(), idx + 1)
         }
         _ => {
             panic!("Unhandled encoded value: {}", encoded_value)
