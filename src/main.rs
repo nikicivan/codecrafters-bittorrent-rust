@@ -108,13 +108,25 @@ fn main() -> Result<()> {
                 .with_context(|| format!("Failed to parse value"))?;
 
             println!(
-                "Tracker URL: {}",
-                parsed_value["announce"].as_str().unwrap().trim_matches('"')
+                "Piece Length: {}",
+                parsed_value["info"]["piece length"].as_u64().unwrap()
             );
-            println!(
-                "Length: {:?}",
-                parsed_value["info"]["length"].as_i64().unwrap()
-            );
+            println!("Piece Hashes:");
+            let piece_hashes = parsed_value["info"]["pieces"].as_array().unwrap();
+
+            let piece_hashes: Vec<u8> = piece_hashes
+                .iter()
+                .map(|x| x.as_u64().unwrap() as u8)
+                .collect();
+
+            hex::encode(piece_hashes)
+                .chars()
+                .collect::<Vec<char>>()
+                .chunks_exact(40)
+                .for_each(|chunk| {
+                    let hash: String = chunk.iter().collect();
+                    println!("{}", hash.trim_matches('"'));
+                });
         }
         _ => {
             println!("unknown command: {}", args[1]);
