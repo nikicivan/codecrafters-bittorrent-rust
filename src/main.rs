@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::env;
 
 fn decode_bencoded_value(encoded_value: &str) -> Value {
@@ -7,6 +7,8 @@ fn decode_bencoded_value(encoded_value: &str) -> Value {
 
 fn decode_bencoded_start_at(raw_value: &str, start_index: usize) -> (Value, usize) {
     let encoded_value = &raw_value[start_index..];
+
+    eprintln!("index: {}, encoded_value: {}", start_index, encoded_value);
 
     match encoded_value.chars().next().unwrap() {
         c if c.is_digit(10) => {
@@ -49,6 +51,29 @@ fn decode_bencoded_start_at(raw_value: &str, start_index: usize) -> (Value, usiz
             }
 
             (list.into(), idx + 1)
+        }
+        'd' => {
+            let mut dictionary: Map<String, Value> = Map::new();
+            let mut idx = start_index + 1;
+
+            while raw_value.chars().nth(idx).unwrap() != 'e' {
+                let (key, new_idx) = decode_bencoded_start_at(raw_value, idx);
+
+                let (value, new_idx) = decode_bencoded_start_at(raw_value, new_idx);
+
+                if let Value::String(key) = key {
+                    dictionary.insert(key, value);
+                } else {
+                    panic!("Unhandled encoded value: {}", encoded_value)
+                }
+
+                idx = new_idx;
+                if raw_value.len() <= idx {
+                    panic!("Unhandled encoded value: {}", encoded_value)
+                }
+            }
+
+            (dictionary.into(), idx + 1)
         }
         _ => {
             panic!("Unhandled encoded value: {}", encoded_value)
