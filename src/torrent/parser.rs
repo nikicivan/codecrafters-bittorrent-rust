@@ -1,6 +1,7 @@
 use crate::torrent::sign::Sign;
 use anyhow::{bail, Context, Result};
 use serde_json::{Map, Value};
+use sha1::{Digest, Sha1};
 
 pub fn decode_bencoded_value(encoded_value: &str) -> Result<Value> {
     Ok(decode_bencoded_start_at(encoded_value, 0)
@@ -178,6 +179,11 @@ pub fn decode_bencoded_vec_start_at(raw_vec: &[u8], start_index: usize) -> Resul
 fn read_vec_u8_to_string(vec: &[u8]) -> Option<String> {
     match String::from_utf8(vec.to_vec()) {
         Ok(result) => Some(result),
-        Err(_) => None,
+        Err(_) => {
+            let mut hasher = Sha1::new();
+            hasher.update(vec);
+            let slice = hasher.finalize();
+            Some(hex::encode(slice))
+        }
     }
 }
