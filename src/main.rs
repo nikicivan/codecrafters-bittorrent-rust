@@ -1,12 +1,14 @@
-use anyhow::{bail, Context, Result};
-use serde_bencode::value::Value;
-use sha1::{Digest, Sha1};
-use std::{env, fs};
+use anyhow::{Context, Result};
+use clap::Parser;
+use commands::commands::{Args, Command};
+use std::fs;
 use torrent::{
-    metainfo_reader::{self},
-    parser::{self, decode_bencoded_value},
+    parser::decode_bencoded_value,
+    torrent::Torrent,
+    tracker::{TrackerRequest, TrackerResponse},
 };
 
+mod commands;
 mod torrent;
 
 // #[derive(Debug, Clone, Deserialize)]
@@ -55,81 +57,43 @@ mod torrent;
 // }
 
 // Usage: your_bittorrent.sh decode "<encoded_value>"
-fn main() -> Result<()> {
-    let args: Vec<String> = env::args().collect();
-    let command = &args[1];
+#[tokio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
 
-    match command.as_str() {
-        "decode" => {
-            let encoded_value = &args[2];
-            let decoded_value = decode_bencoded_value(encoded_value)
-                .with_context(|| format!("Unable to decode value"))?;
-
-            println!("{}", decoded_value.to_string());
+    match args.command {
+        Command::Decode { encoded_value } => {
+            let decoded_value = decode_bencoded_value(&encoded_value)
+                .with_context(|| format!("Failed to decode value"))?;
+            println!("{}", decoded_value.to_string())
         }
-        "info" => {
-            let metainfo_file_path = &args[2];
+        Command::Info { torrent } => {
+            let f: Vec<u8> = fs::read(torrent)?;
+            let t: Torrent = serde_bencode::from_bytes(&f)?;
+            println!("Tracker URL: {}", t.announce);
 
-            let info = serde_bencode::from_bytes::<Value>(&fs::read(metainfo_file_path)?)?;
+            let length = t.info.length;
+            println!("Length: {length}");
 
-            if let Value::Dict(dict) = info {
-                let announce = dict
-                    .get(b"announce".as_ref())
-                    .with_context(|| format!("no announce"))?;
-
-                let info = dict
-                    .get(b"info".as_ref())
-                    .with_context(|| format!("no info"))?;
-
-                let hash: String = hex::encode(Sha1::digest(serde_bencode::to_bytes(info)?));
-
-                if let (Value::Bytes(announce), Value::Dict(info)) = (announce, info) {
-                    println!("Tracker URL: {}", String::from_utf8_lossy(announce));
-                    let length = info.get(b"length".as_ref()).context("no length")?;
-
-                    if let Value::Int(length) = length {
-                        println!("Length: {length}");
-                        println!("Info Hash: {hash}");
-                    } else {
-                        bail!("Invalid torrent file")
-                    }
-                } else {
-                    bail!("Invalid torrent file")
-                }
-            } else {
-                bail!("Invalid torrent file")
-            }
-
-            let metainfo_file_path = &args[2];
-            let metainfo_file_content = metainfo_reader::read_file_to_bytes(metainfo_file_path)
-                .with_context(|| format!("Failed to read metainfo file"))?;
-
-            let parsed_value = parser::decode_bencoded_vec(&metainfo_file_content)
-                .with_context(|| format!("Failed to parse value"))?;
-
-            println!(
-                "Piece Length: {}",
-                parsed_value["info"]["piece length"].as_u64().unwrap()
-            );
+            let info_hash = t.info_hash();
+            println!("Info Hash: {}", hex::encode(&info_hash));
+            println!("Piece Length: {}", t.info.piece_length);
             println!("Piece Hashes:");
-            let piece_hashes = parsed_value["info"]["pieces"].as_array().unwrap();
 
-            let piece_hashes: Vec<u8> = piece_hashes
-                .iter()
-                .map(|x| x.as_u64().unwrap() as u8)
-                .collect();
-
-            hex::encode(piece_hashes)
-                .chars()
-                .collect::<Vec<char>>()
-                .chunks_exact(40)
-                .for_each(|chunk| {
-                    let hash: String = chunk.iter().collect();
-                    println!("{}", hash.trim_matches('"'));
-                });
+            for hash in t.info.pieces.0 {
+                println!("{}", hex::encode(&hash));
+            }
         }
-        _ => {
-            println!("unknown command: {}", args[1]);
+        Command::Peers { torrent } => {
+            let f: Vec<u8> = fs::read(torrent)?;
+            let t: Torrent = serde_bencode::from_bytes(&f)?;
+            let tracker = TrackerRequest::new(&t);
+
+            let response: TrackerResponse = tracker.send(&t.announce, &t.info_hash()).await?;
+
+            for peer in response.peers.0 {
+                println!("{}", peer);
+            }
         }
     }
 
