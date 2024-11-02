@@ -7,6 +7,7 @@ pub enum Command {
     Decode { encoded_value: String },
     Info { torrent: PathBuf },
     Peers { torrent: PathBuf },
+    Handshake { torrent: PathBuf, addr: String },
 }
 
 #[derive(Parser, Debug)]
